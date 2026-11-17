@@ -37,8 +37,15 @@ D8="$(ls -d "$SDK"/build-tools/*/d8 2>/dev/null | sort -V | tail -1)"
 OUT="$ROOT/dex/out"; rm -rf "$OUT"; mkdir -p "$OUT" "$ROOT/module/etc"
 # shellcheck disable=SC2046
 javac --release 11 -cp "$AJ" -d "$OUT" $(find "$ROOT/dex/src" -name '*.java')
-# shellcheck disable=SC2046
-"$D8" --min-api 26 --lib "$AJ" --output "$ROOT/dex" $(find "$OUT" -name '*.class')
+# Two entry points, one dex each, kept apart so a class added for one verb can
+# never change the startup cost of the other: Scope runs on every WebUI open,
+# Identity only when the user asks for an identifier.
+"$D8" --min-api 26 --lib "$AJ" --output "$ROOT/dex" \
+    $(find "$OUT/com/vd171/copgvd" -maxdepth 1 -name 'Scope*.class')
 mv "$ROOT/dex/classes.dex" "$ROOT/module/etc/copgvd_scope.dex"
+"$D8" --min-api 26 --lib "$AJ" --output "$ROOT/dex" \
+    $(find "$OUT/com/vd171/copgvd" -maxdepth 1 -name 'Identity*.class')
+mv "$ROOT/dex/classes.dex" "$ROOT/module/etc/copgvd_identity.dex"
 rm -rf "$OUT"
 echo "built module/etc/copgvd_scope.dex ($(wc -c < "$ROOT/module/etc/copgvd_scope.dex") bytes)"
+echo "built module/etc/copgvd_identity.dex ($(wc -c < "$ROOT/module/etc/copgvd_identity.dex") bytes)"

@@ -270,6 +270,16 @@ apply_props() {
   GRUPOS=$(printf '%s' "$json_flat" | grep -o '"grupos"[[:space:]]*:[[:space:]]*{[^}]*}')
   SCOPE_MODE=$(printf '%s' "$json_flat" | grep -o '"scope_mode"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')
   [ -n "$SCOPE_MODE" ] || SCOPE_MODE=playstore
+  # Normalise like the native side does, and refuse to treat an unknown mode
+  # as "global". The C++ engine already fails closed; this keeps the shell
+  # pass from widening the scope on its own.
+  SCOPE_MODE=$(printf '%s' "$SCOPE_MODE" | tr 'A-Z' 'a-z' | tr -d '[:space:]')
+  case "$SCOPE_MODE" in
+    playstore|global|whitelist|blacklist) : ;;
+    *)
+      echo "[$MODULE_ID] unknown scope_mode '$SCOPE_MODE' - assuming playstore" >&2
+      SCOPE_MODE=playstore ;;
+  esac
   GLOBAL_FIELDS=$(printf '%s' "$json_flat" | grep -o '"global_fields"[[:space:]]*:[[:space:]]*\[[^]]*\]' | sed 's/.*\[//' | grep -o '"[A-Za-z0-9_]*"' | tr -d '"' | tr '\n' ' ')
   apply_global_fields
   write_security_patch_txt
@@ -355,6 +365,36 @@ apply_props() {
 }
 
 migrate_data_dir
+
+# `--probe` exists so the host test can run this script's argument handling
+# and helpers without root; everything below assumes root.
+if [ "$1" = "--probe" ]; then
+    [ "$(id -u)" = 0 ] && echo "root" || echo "not-root"
+    exit 0
+fi
+
+# ---------------------------------------------------------------- identity
+# Per-identifier overlay. Opt-in: does nothing unless the config carries a
+# COPG-VD-Identity block with "enabled": true, because rewriting an SSAID or
+# an advertising id is destructive and must be a deliberate choice.
+identity_enabled() {
+  [ -f "$COPG_VD_JSON" ] || return 1
+  printf '%s' "$(tr -d '\n' < "$COPG_VD_JSON" 2>/dev/null)" \
+    | grep -qE '"COPG-VD-Identity"[[:space:]]*:[[:space:]]*\{[^}]*"enabled"[[:space:]]*:[[:space:]]*true'
+}
+
+apply_identity() {
+  [ "$(cfg_setting identity)" = false ] && { log "identity engine disabled by settings"; return 0; }
+  identity_enabled || return 0
+  [ -f "$MODDIR/identity.sh" ] || { log "identity.sh missing"; return 0; }
+  _ir=$(sh "$MODDIR/identity.sh" apply 2>&1)
+  case "$_ir" in
+    *"status: applied"*) log "identity overlay applied";;
+    *) log "identity overlay did not apply: $(printf '%s' "$_ir" | head -n 2 | tr '\n' ' ')";;
+  esac
+}
+
+apply_identity
 
 if [ "$1" = "--props-only" ]; then
     apply_props

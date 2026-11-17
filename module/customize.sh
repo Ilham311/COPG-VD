@@ -340,6 +340,14 @@ setup_vdlu
 
 chmod 0755 "$MODPATH/service.sh"
 chmod 0755 "$MODPATH/fingerprint-update.sh"
+# The identity writer rewrites files owned by system_server and Play services;
+# it must be executable from boot, and its state directory must exist with the
+# same context as the rest of the module data.
+[ -f "$MODPATH/identity.sh" ] && chmod 0755 "$MODPATH/identity.sh" 2>/dev/null
+[ -f "$MODPATH/etc/copgvd_identity.dex" ] && chmod 0644 "$MODPATH/etc/copgvd_identity.dex" 2>/dev/null
+mkdir -p "$DATA_DIR/identity" 2>/dev/null
+chmod 0700 "$DATA_DIR/identity" 2>/dev/null
+chcon u:object_r:system_file:s0 "$DATA_DIR/identity" 2>/dev/null
 chmod 0644 "$CONFIG_FILE"
 chcon u:object_r:system_file:s0 "$CONFIG_FILE"
 
