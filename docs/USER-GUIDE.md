@@ -120,7 +120,7 @@ Run it whenever you edit the config by hand.
 
 ## The WebUI
 
-Optional, but the easy way to drive everything. Five tabs:
+Optional, but the easy way to drive everything. Six tabs:
 
 - **About**: module and version info.
 - **Device**: every build field, set per state and grouped by category.
@@ -129,6 +129,8 @@ Optional, but the easy way to drive everything. Five tabs:
 - **Tools**: Analyze, Check Update, Update Now, Backup / Restore, the boot auto-update,
   and the Diagnostics report (one button to read and export everything useful for a bug
   report).
+- **Updates**: the incremental module updater (VDLU): check, progress, cancel, resume, and
+  the pending-reboot banner.
 
 It makes no network request; everything it needs ships inside the module.
 

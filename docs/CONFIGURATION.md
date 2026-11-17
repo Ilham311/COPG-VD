@@ -30,10 +30,12 @@ Rules:
 | `COPG-VD-Settings` | object | Module settings that travel with the profile (see below). |
 | `motor_jni` | bool | Build-fields engine (rewrites `android.os.Build.*`). Default `true`. |
 | `motor_prop_hook` | bool | Per-process property engine (clean-room property remap). Default `true`. |
+| `prop_method` | string | How the property engine is delivered. Only `mmap` is implemented; `off` disables it. Default `mmap` since v6.16 (it used to default to `off`, so a fresh install silently had no native property spoofing). |
 | `motor_drm` | bool | DRM / Widevine engine. Default `false`. |
 | `drm_targets` | array | Apps that get the DRM spoof regardless of `scope_mode`. Empty = follow the scope. |
 | `global_fields` | array | Build fields applied device-wide even in a scoped mode, for coherence-safe fields only. |
-| `process_overrides` | object | Per-process field overrides: `{ "process.name": { "FIELD": "value" } }`. |
+| `process_overrides` | object | Per-process field overrides: `{ "process.name": { "FIELD": "value" } }`. Must be an object; `{}` means none. |
+| `COPG-VD-Identity` | object | The SSAID / GSF / AAID overlay. Off by default. See [IDENTITY.md](IDENTITY.md). |
 | `verbose_logs` | bool | Extra logcat detail for debugging. Default `false`. |
 
 ## The `COPG-VD` profile object
@@ -79,6 +81,26 @@ Settings that travel with the profile, so a backup carries your choices.
 | `resetprop` | bool | Whether the device-wide resetprop engine runs. |
 | `autoupdate` | bool | Whether `fingerprint-update.sh` runs once per boot. Default on. |
 | `spoof_version` | `never` / `rom` / `force` | How the Android version group applies. `never` is the default; `force` is refused when restoring a backup. |
+| `feed_signature` | `required` / `auto` / `off` | Whether a fetched profile must carry an ed25519 signature. `auto` (default) verifies when the feed publishes `<url>.sig` and otherwise applies the profile with a logged warning; `required` refuses an unsigned profile; `off` skips the check. Only the exact word `off` disables it, so a typo or a lost line leaves verification on. |
+| `identity` | bool | Whether `service.sh` runs the identity overlay at boot. Default off; also needs `COPG-VD-Identity.enabled`. |
+
+## `COPG-VD-Identity`
+
+The three identifiers that are not part of the Build profile, because each is stored by a
+different component. **Off by default**: every one of them is destructive to change. Full
+detail, including why the SSAID is derived rather than invented, is in
+[IDENTITY.md](IDENTITY.md).
+
+| Key | Type | Meaning |
+|---|---|---|
+| `enabled` | bool | Run the overlay from `service.sh` at boot. Default `false`. |
+| `ssaid` | 16 lower-case hex | `Settings.Secure.ANDROID_ID`. Leave empty to derive it from the package's signing certificate the way Android does. |
+| `gsf_id` | decimal | The Play check-in id. Written to `gservices.db` when `sqlite3` is available. |
+| `aaid` | UUID v4 | The advertising id written to `adid_settings.xml`. |
+| `rotate_on_apply` | bool | Generate fresh values on every apply instead of keeping the stored ones. Default `false`. |
+
+`ssaid_user_key` is accepted too, for restoring a known key; it must be 32 (or legacy 16)
+hex bytes.
 
 ## `global_fields`
 

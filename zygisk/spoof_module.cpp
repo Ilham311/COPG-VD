@@ -95,7 +95,13 @@ struct ScopeConfig {
     bool motor_jni = true;
     bool motor_prop_hook = true;
     bool motor_drm = false;
-    std::string prop_method = "off";
+    /* The property hook is a memory remap, not a function hook, and it is the
+     * only engine that makes native getprop() calls see the profile. It used
+     * to default to "off" while the documentation promised it was on, so a
+     * fresh install silently shipped without it. "mmap" is the only supported
+     * method; an explicit "off" still disables it. */
+    std::string prop_method = "mmap";
+    bool mode_recognized = true;
     std::vector<std::string> whitelist;
     std::vector<std::string> blacklist;
     std::vector<std::string> playstore;
@@ -104,6 +110,12 @@ struct ScopeConfig {
     std::map<std::string, std::map<std::string, std::string>> process_overrides;
     bool verbose_logs = false;
 };
+
+/* Every mode the engine implements. Anything else is a configuration error,
+ * and must NOT fall through to "spoof everyone". */
+static bool isKnownMode(const std::string& m) {
+    return m == "playstore" || m == "global" || m == "whitelist" || m == "blacklist";
+}
 
 static inline std::string trim(const std::string& str) {
     auto start = std::find_if_not(str.begin(), str.end(), [](unsigned char c) { 
@@ -307,9 +319,22 @@ static bool readConfig(const std::string& path, Config& out, std::set<std::strin
                 p = skipToken(tokens, p);
             }
         } else if (scope && keyName == "scope_mode" && val.type == JSMN_STRING) {
-            scope->mode = tokenText(text, val);
+            std::string raw = trim(tokenText(text, val));
+            /* Accept the documented spellings, and tolerate case and stray
+             * whitespace instead of silently widening the scope. */
+            std::string folded;
+            for (char c : raw) folded.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            if (isKnownMode(folded)) {
+                scope->mode = folded;
+                scope->mode_recognized = true;
+            } else {
+                scope->mode = folded;
+                scope->mode_recognized = false;
+            }
         } else if (scope && keyName == "prop_method" && val.type == JSMN_STRING) {
-            scope->prop_method = tokenText(text, val);
+            std::string m = trim(tokenText(text, val));
+            for (auto& c : m) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            scope->prop_method = m;
         } else if (scope && keyName == "motor_jni" && val.type == JSMN_PRIMITIVE) {
             scope->motor_jni = tokenText(text, val) != "false";
         } else if (scope && keyName == "motor_prop_hook" && val.type == JSMN_PRIMITIVE) {
@@ -332,7 +357,22 @@ static bool readConfig(const std::string& path, Config& out, std::set<std::strin
                 if (tokens[p].type == JSMN_STRING) dst.push_back(tokenText(text, tokens[p]));
                 p = skipToken(tokens, p);
             }
-        } else if (scope && keyName == "process_overrides" && val.type == JSMN_OBJECT) {
+        } else if (scope && keyName == "process_overrides" &&
+                   (val.type == JSMN_OBJECT || val.type == JSMN_ARRAY)) {
+            /* The documented shape is an object, but the shipped example used
+             * to write [] (the empty array), which this branch silently
+             * ignored. Accept an empty array as "none" so the example and the
+             * parser cannot disagree; a non-empty array is still a type error
+             * and is reported below rather than guessed at. */
+            if (val.type == JSMN_ARRAY) {
+                if (val.size == 0) {
+                    i = skipToken(tokens, i);
+                    continue;
+                }
+                LOGE("process_overrides must be an object; an array of entries was ignored");
+                i = skipToken(tokens, i);
+                continue;
+            }
             int p = i + 2;
             for (int n = 0; n < val.size; n++) {
                 const jsmntok_t& procKey = tokens[p];
@@ -366,6 +406,11 @@ static bool procMatches(const std::string& entry, const std::string& proc) {
     return proc == entry || proc.rfind(entry + ":", 0) == 0;
 }
 static bool inScope(const ScopeConfig& sc, const std::string& proc) {
+    /* One list, one matching rule. These two names are what "the Play stack"
+     * means when scope_playstore_targets is absent; unstable is separate
+     * because it is the DroidGuard process and is not a child of either. */
+    static const char* kPlayDefaults[] = {"com.google.android.gms",
+                                          "com.android.vending"};
     if (sc.mode == "whitelist") {
         for (const auto& e : sc.whitelist) if (procMatches(e, proc)) return true;
         return false;
@@ -375,14 +420,30 @@ static bool inScope(const ScopeConfig& sc, const std::string& proc) {
         return true;
     }
     if (sc.mode == "playstore") {
-        if (sc.playstore.empty())
-            return proc == "com.google.android.gms" ||
-                   proc == "com.google.android.gms.unstable" ||
-                   proc == "com.android.vending";
+        /* The built-in list and an explicit scope_playstore_targets must match
+         * the same way. They used to differ: the built-in branch compared the
+         * process name for equality, while an explicit list used procMatches(),
+         * so with the default list a child such as
+         * com.android.vending:background fell outside the scope that the same
+         * name would be inside had it been listed by hand. */
+        if (proc == "com.google.android.gms.unstable") return true;
+        if (sc.playstore.empty()) {
+            for (const char* e : kPlayDefaults)
+                if (procMatches(e, proc)) return true;
+            return false;
+        }
         for (const auto& e : sc.playstore) if (procMatches(e, proc)) return true;
         return false;
     }
-    return true;
+    if (sc.mode == "global") return true;
+    /* Unknown mode. This used to `return true`, which turned a typo
+     * ("PlayStore", "playstore ", "whitelst") into "spoof every process on
+     * the device" with no error anywhere. Fail closed at the narrowest real
+     * scope instead, and say so once per boot. */
+    if (proc == "com.google.android.gms.unstable") return true;
+    for (const char* e : kPlayDefaults)
+        if (procMatches(e, proc)) return true;
+    return false;
 }
 static bool inDrmScope(const ScopeConfig& sc, const std::string& proc) {
     if (!sc.drm_targets.empty()) {
@@ -395,27 +456,62 @@ static bool inDrmScope(const ScopeConfig& sc, const std::string& proc) {
 static jint   (*orig_drm_getSecurityLevel)(JNIEnv*, jobject) = nullptr;
 static jint   (*orig_drm_getSecurityLevelSession)(JNIEnv*, jobject, jbyteArray) = nullptr;
 static jstring(*orig_drm_getPropertyString)(JNIEnv*, jobject, jstring) = nullptr;
-static int         g_drm_level_int = 0;
-static const char* g_drm_level_str = nullptr;
+
+/* One source of truth for the reported level. Android's constants are
+ * SECURITY_LEVEL_L1 = 1 and SECURITY_LEVEL_L3 = 3, so the integer and the
+ * "securityLevel" property string MUST be derived from the same decision.
+ * Deriving them from two independent ternaries (as this did) made the two
+ * APIs disagree: getSecurityLevel() returned 3 (L3) while
+ * getPropertyString("securityLevel") returned "L1". */
+enum class WidevineLevel { Unset, L1, L3 };
+
+static WidevineLevel g_drm_level = WidevineLevel::Unset;
+
+static jint drmLevelInt() {
+    switch (g_drm_level) {
+        case WidevineLevel::L1: return 1;   /* MediaDrm.SECURITY_LEVEL_L1 */
+        case WidevineLevel::L3: return 3;   /* MediaDrm.SECURITY_LEVEL_L3 */
+        default: return 0;
+    }
+}
+
+static const char* drmLevelStr() {
+    switch (g_drm_level) {
+        case WidevineLevel::L1: return "L1";
+        case WidevineLevel::L3: return "L3";
+        default: return nullptr;
+    }
+}
+
+static bool parseWidevineLevel(const std::string& s, WidevineLevel& out) {
+    std::string v;
+    for (char c : s) v.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    if (v == "L1") { out = WidevineLevel::L1; return true; }
+    if (v == "L3") { out = WidevineLevel::L3; return true; }
+    return false;
+}
 
 static jint drm_getSecurityLevel(JNIEnv* env, jobject thiz) {
-    if (g_drm_level_int) return g_drm_level_int;
+    const jint level = drmLevelInt();
+    if (level) return level;
     if (orig_drm_getSecurityLevel) return orig_drm_getSecurityLevel(env, thiz);
     return 0;
 }
 
 static jint drm_getSecurityLevelSession(JNIEnv* env, jobject thiz, jbyteArray sessionId) {
-    if (g_drm_level_int) return g_drm_level_int;
+    const jint level = drmLevelInt();
+    if (level) return level;
     if (orig_drm_getSecurityLevelSession) return orig_drm_getSecurityLevelSession(env, thiz, sessionId);
     return 0;
 }
 
 static jstring drm_getPropertyString(JNIEnv* env, jobject thiz, jstring name) {
-    if (g_drm_level_str && name) {
+    const char* level = drmLevelStr();
+    if (level && name) {
         const char* n = env->GetStringUTFChars(name, nullptr);
         const bool match = n && std::string(n) == "securityLevel";
         if (n) env->ReleaseStringUTFChars(name, n);
-        if (match) return env->NewStringUTF(g_drm_level_str);
+        if (match) return env->NewStringUTF(level);
     }
     if (orig_drm_getPropertyString) return orig_drm_getPropertyString(env, thiz, name);
     return env->NewStringUTF("");
@@ -712,9 +808,14 @@ private:
     void installDrmHook() {
         if (!scope_cfg.motor_drm) return;
         const std::string lvl = get(cfg_device, "DRM_SECURITY_LEVEL", "L1");
-        const bool l3 = (lvl == "L3" || lvl == "l3");
-        g_drm_level_int = l3 ? 1 : 3;
-        g_drm_level_str = l3 ? "L3" : "L1";
+        WidevineLevel parsed = WidevineLevel::Unset;
+        if (!parseWidevineLevel(lvl, parsed)) {
+            /* A typo must not silently pick a level; fall back to L1 and say so
+             * once, rather than reporting L3 because the string was unknown. */
+            LOGE("DRM_SECURITY_LEVEL '%s' is not L1 or L3; using L1", lvl.c_str());
+            parsed = WidevineLevel::L1;
+        }
+        g_drm_level = parsed;
         JNINativeMethod methods[] = {
             {"getSecurityLevel", "()I", (void*)drm_getSecurityLevel},
             {"getSecurityLevel", "([B)I", (void*)drm_getSecurityLevelSession},

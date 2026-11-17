@@ -25,11 +25,15 @@ as we can and credit you if you wish.
 
 ## Scope notes
 
-- The configuration lives at `/data/adb/COPG-VD.json`, readable only by root. The module
+- The configuration lives at `/data/adb/COPG-VD/COPG-VD.json` (a pre-v6.11 `/data/adb/COPG-VD.json` is migrated automatically), readable only by root. The module
   reads it from the injected process through a dedicated SELinux rule it ships itself; it
   holds no credentials or passphrases.
 - The spoofing hooks are attached to live apps and are null-checked so a malformed profile
   degrades gracefully instead of crashing the app.
+- The optional identity overlay (`identity.sh`, off by default) rewrites
+  `settings_ssaid.xml`, `gservices.db` and `adid_settings.xml`. It backs up every file it
+  touches before writing, refuses to modify a file it could not back up, and
+  `identity.sh restore` puts the newest backup back. See [IDENTITY.md](docs/IDENTITY.md).
 - There is **no telemetry and no network** except the optional profile fetch, which
   downloads a public Pixel profile over HTTPS from
   [github.com/VictorGabriel7Dev/build.prop](https://github.com/VictorGabriel7Dev/build.prop)

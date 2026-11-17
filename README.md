@@ -132,7 +132,7 @@ The block above and `module/COPG-VD.json.example` are refreshed daily by the [Up
 **Analyze** in the WebUI (or `fingerprint-update.sh analyze`) audits the config as it stands: version against the ROM, whether the file still parses at all (a broken one makes the module spoof **nothing**, and only logcat says so), whether the fingerprint agrees with the fields around it, keys the module does not read, dates, and whether the props already carry what the config asks for.  
 
 ### WebUI
-The WebUI is optional (everything can be edited in the JSON config directly) but it is the easy way to drive the module. It has five tabs: **About**, **Device** (every field, set per state, grouped by category), **Spoofing** (scope and engines), **System** (the resetprop groups) and **Tools** (Analyze, Check Update, Update Now, Backup/Restore and the boot auto-update). It makes no network request; everything it needs ships inside the module.  
+The WebUI is optional (everything can be edited in the JSON config directly) but it is the easy way to drive the module. It has six tabs: **About**, **Device** (every field, set per state, grouped by category), **Spoofing** (scope and engines), **System** (the resetprop groups), **Tools** (Analyze, Check Update, Update Now, Backup/Restore and the boot auto-update) and **Updates** (the incremental module updater). It makes no network request; everything it needs ships inside the module.  
 If you are a Magisk user, use KsuWebUI by KOW (https://github.com/KOWX712/KsuWebUIStandalone/releases). You can also use WebUI-X Portable by MMRL (https://github.com/MMRLApp/WebUI-X-Portable/releases) or KsuWebUI-SN (https://github.com/dnascorpionofficial/KsuWebUI-SN/releases).  
 
 ### Settings in the config

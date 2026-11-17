@@ -138,13 +138,31 @@ download_to() {
 }
 
 # --- feed signature (detached ed25519, same chain as the VDLU module feed) ---------------------------
-# A fetched profile is applied only if it carries a valid signature from the release key. The signature
-# is base64(ed25519_sign(sha256_hex(content))) in "<key_id>:<sig>" form, verified with the embedded
-# ed25519-mini + keyring/<key_id>.pub (raw 32 bytes) - no openssl on-device. See the design doc.
-# REQUIRE_FEED_SIG is 0 until the feeds publish their .sig; the cutover flips it to 1 (fail-closed).
+# A fetched profile is applied only if it carries a valid signature. The signature is
+# base64(ed25519_sign(sha256_hex(content))) in "<key_id>:<sig>" form, verified with the embedded
+# ed25519-mini + keyring/<key_id>.pub (raw 32 bytes) - no openssl on-device.
+#
+# Three states, set by COPG-VD-Settings.feed_signature:
+#   required  refuse an unsigned profile outright.
+#   auto      (default) verify whenever the feed publishes <url>.sig; if the feed has none
+#             yet, apply it and say so loudly in the log. This is the state both feeds are
+#             in today: they return 404 for .sig, so "required" would stop every profile
+#             update. The point of "auto" over the old hardcoded 0 is that the decision is
+#             visible and recorded instead of silent.
+#   off       never verify. Only this literal value disables the check.
+#
+# FAIL-CLOSED BY INVERSION: anything that is not the exact word "off" - a lost line, a typo,
+# whitespace, a CR from a hand-edited file - leaves verification at least at "auto", never at
+# "off". The earlier version defaulted to 0 ("not required"), so an unset variable trusted an
+# unsigned profile.
 # FEED_KEY_ID pins the feed to its OWN dedicated key - not the module-release key vd-2026, so a
 # compromise of one key never forges the other (separation of concerns).
-REQUIRE_FEED_SIG="${REQUIRE_FEED_SIG:-0}"
+_feed_setting=$(cfg_setting feed_signature | tr -d '[:space:]')
+case "$_feed_setting" in
+    off|OFF|Off)          FEED_SIG_MODE=off ;;
+    required|REQUIRED)    FEED_SIG_MODE=required ;;
+    *)                    FEED_SIG_MODE=auto ;;
+esac
 FEED_KEY_ID="vd-fp-2026"
 
 find_mini() {
@@ -175,10 +193,28 @@ verify_feed_sig() {   # <content_file> <sig_file> -> rc 0 if the detached signat
     rm -rf "$_td"; log "feed signature REJECTED"; return 1
 }
 
-require_sig() {   # <content_file> <content_url> -> rc 0 if ok or not required; rc 1 if required and bad
-    [ "$REQUIRE_FEED_SIG" = 1 ] || return 0
+require_sig() {   # <content_file> <content_url>
+    # rc 0 = verified, or unsigned and that is acceptable for the current mode.
+    # rc 1 = signature was present and bad, or absent while mode=required.
+    [ "$FEED_SIG_MODE" = off ] && return 0
     _st="$1.sig.tmp"
-    download_to "$2.sig" "$_st" || { log "feed: signature unavailable for $(basename "$2")"; rm -f "$_st"; return 1; }
+    if ! download_to "$2.sig" "$_st"; then
+        rm -f "$_st"
+        case "$FEED_SIG_MODE" in
+            required)
+                log "feed: no signature at $2.sig and feed_signature=required - refusing the profile"
+                return 1
+                ;;
+            *)
+                # Say it once per run, in the log the user can read, rather than
+                # trusting silence. The profile is still shape-validated by
+                # validate_remote() and sane_value().
+                log "feed: $2.sig is not published yet - applying an UNSIGNED profile (feed_signature=auto)"
+                log "feed: set COPG-VD-Settings.feed_signature=required once the feed signs its files"
+                return 0
+                ;;
+        esac
+    fi
     verify_feed_sig "$1" "$_st"; _vr=$?; rm -f "$_st"; return $_vr
 }
 
