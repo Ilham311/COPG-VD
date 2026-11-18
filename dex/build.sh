@@ -29,10 +29,15 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
-AJ="$(ls -d "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)"
-D8="$(ls -d "$SDK"/build-tools/*/d8 2>/dev/null | sort -V | tail -1)"
-[ -f "$AJ" ] || { echo "android.jar not found under $SDK/platforms" >&2; exit 1; }
-[ -x "$D8" ] || { echo "d8 not found under $SDK/build-tools" >&2; exit 1; }
+# ANDROID_JAR allows a build without a full SDK layout (a Termux install has
+# android.jar and d8 on PATH but no platforms/ or build-tools/ tree).
+# The `|| true`s matter: under `set -e`, a failing command substitution in an
+# assignment exits the script silently, before the error message below runs.
+AJ="${ANDROID_JAR:-$(ls -d "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1 || true)}"
+D8="$(ls -d "$SDK"/build-tools/*/d8 2>/dev/null | sort -V | tail -1 || true)"
+[ -n "$D8" ] && [ -x "$D8" ] || D8="$(command -v d8 2>/dev/null || true)"
+[ -f "$AJ" ] || { echo "android.jar not found (set ANDROID_JAR, or install platforms/ under $SDK)" >&2; exit 1; }
+[ -n "$D8" ] && [ -x "$D8" ] || { echo "d8 not found (set up build-tools/ under $SDK, or put d8 on PATH)" >&2; exit 1; }
 
 OUT="$ROOT/dex/out"; rm -rf "$OUT"; mkdir -p "$OUT" "$ROOT/module/etc"
 # shellcheck disable=SC2046

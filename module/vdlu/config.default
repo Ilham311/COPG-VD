@@ -1,8 +1,27 @@
+# VDLU settings for this fork.
+#
+# source= is deliberately EMPTY. The upstream value pointed at
+# https://vd171.github.io/VD-Modules/COPG-VD, whose signed manifest lists the
+# UPSTREAM files (service.sh, fingerprint-update.sh, zygisk/*.so). With
+# auto_on_reboot=1 the boot engine would fetch that manifest and overwrite this
+# fork's versions on the device, silently reverting every fix in it. The engine
+# refuses to run without a source, which is the correct fail-closed default for
+# a fork that is not publishing its own signed feed.
+#
+# To re-enable in-place updates you need your own feed, signed with YOUR key:
+#   1. replace vdlu/keyring/*.pub with your public key (raw 32 bytes)
+#   2. set pubkey_dir/keyring accordingly and use profile=hardened
+#   3. set source= to your Pages URL that serves manifest.json + blobs/
+#   4. regenerate vdlu/baseline.json for the build you are shipping
+# See module/vdlu/RELEASE.md for the producer steps.
+#
+# Until then, updates come from the GitHub Releases of the fork through
+# update.json (the manager's own "install from URL" path).
 profile=hardened
-source=https://vd171.github.io/VD-Modules/COPG-VD
+source=
 channel=stable
-auto_on_reboot=1
-auto_on_webui_open=1
+auto_on_reboot=0
+auto_on_webui_open=0
 net_policy=any
-boot_retry_minutes=1440
+boot_retry_minutes=0
 pubkey_dir=keyring

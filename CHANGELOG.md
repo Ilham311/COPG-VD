@@ -1,5 +1,19 @@
 # Changelog
 
+## v6.16.1-vd
+
+Fork release by Ilham311, based on upstream v6.16-vd.
+
+- The scope decision is now fail-closed. `scope_mode` used to fall through to "spoof every process" when its value was not one of the four known words, so a typo such as `"PlayStore"`, `"playstore "` or `"whitelst"` silently widened the spoof to the whole device. Unknown values now normalise (case, whitespace) and otherwise behave as `playstore`, with a line in logcat.
+- The built-in Play scope and an explicit `scope_playstore_targets` list now match the same way. The built-in list compared process names for equality, so a child process such as `com.android.vending:background` fell outside the scope that the same name inside a hand-written list would have been inside.
+- The Widevine level no longer contradicts itself. `getSecurityLevel()` returned L3 while `getPropertyString("securityLevel")` returned "L1" for the same profile, because the two were derived from separate ternaries. One enum now drives both, and an unrecognised value is reported instead of guessed.
+- The property engine is on by default. It required `prop_method: "mmap"` while defaulting to `"off"`, so a fresh install had no native property spoofing despite the documentation saying otherwise.
+- `process_overrides` works from the shipped example. The example wrote it as `[]`, which the object-only parser ignored, so the documented feature did nothing until the key was removed by hand.
+- New: an optional identity overlay for the three identifiers that are not part of the Build profile — `Settings.Secure.ANDROID_ID` (SSAID), the Play check-in id (GSF) and the advertising id (AAID). The SSAID is derived with the same algorithm Android uses (`HMAC-SHA256` over the package signing certificate), not invented at random. Off by default; every file is backed up before it is written and `identity.sh restore` puts it back. See `docs/IDENTITY.md`.
+- Profile feed signatures are no longer switched off by default. `feed_signature` is `required`, `auto` (default) or `off`, and every value except the exact word `off` leaves verification on. With `auto` the update is applied when the feed publishes no `.sig` yet, and the log says so.
+- **In-place self-update is disabled in this fork.** The bundled VDLU feed pointed at the upstream module feed, which would have replaced this build's `service.sh`, `fingerprint-update.sh` and native library with upstream's on the first boot. Updates for this fork come from its GitHub Releases through `update.json`; re-enabling the in-place engine needs a feed signed with the fork's own key (see `module/vdlu/config.default`).
+- The host test suite runs 19 steps without a device: SSAID derivation against AOSP reference vectors, the identity shell paths, the feed-signature policy, the scope decision table, and a compile of the native module for all three ABIs. CI runs it before packaging.
+
 ## v6.16-vd
 
 - Backup and Restore work again. The configuration moved into its own folder a few versions back, but the Backup/Restore tool was still looking for it in the old location, so both failed. It now reads from and writes to the current location (with a fallback to the old one). Thanks to tahsinahmed2 for the report (#29).

@@ -54,7 +54,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    environment: COPG-VD
+    # Upstream pins an `environment: COPG-VD` here, which gates the job on an
+    # environment that only exists in that repository; on a fork the job would
+    # sit waiting for approval. Nothing in this workflow needs environment
+    # secrets - the token is the workflow token - so it is simply not used.
 
     steps:
       - name: Checkout code
@@ -144,42 +147,11 @@ jobs:
           } > CHANGELOG.new && mv CHANGELOG.new CHANGELOG.md
           sed -n '1,8p' CHANGELOG.md
 
-      - name: Prepare module structure
-        run: |
-          mkdir -p module/zygisk
-          for abi in arm64-v8a armeabi-v7a x86_64; do
-            cp "zygisk/build/$abi/libspoof.so" "module/zygisk/$abi.so"
-          done
-          chmod 755 module/zygisk/*.so
-
-          # The WebUI reads these locally instead of fetching them from GitHub at runtime.
-          cp README.md LICENSE module/webroot/
-
-          chmod 755 module/customize.sh module/service.sh module/fingerprint-update.sh module/post-fs-data.sh module/vdlu/update.sh module/vdlu/vdlu-verify module/META-INF/com/google/android/update-binary
-
-          # VDLU bundled tools (openssl/curl/zstd per ABI): ship them executable and
-          # refuse to release any ABI that lacks its supply-chain provenance.
-          # Regenerate with .github/scripts/build_bin.sh (see module/vdlu/RELEASE.md).
-          if [ -d module/bin ]; then
-            find module/bin -type f ! -name '.gitkeep' ! -name 'PROVENANCE.json' -exec chmod 755 {} +
-            for d in module/bin/*/; do
-              [ -f "$d/PROVENANCE.json" ] || { echo "::error::missing provenance: $d"; exit 1; }
-            done
-          fi
-
-      # Framework scope-helper dex (javac + d8), arch-independent, built fresh so the
-      # gitignored binary never drifts from source. Lists every static android:process
-      # (the hidden ones dumpsys misses) for the WebUI scope picker. Non-fatal: the
-      # WebUI falls back to shell enumeration if the dex is absent.
-      - name: Build scope-helper dex
-        run: |
-          bash dex/build.sh
-          [ -f module/etc/copgvd_scope.dex ] || { echo "::error::copgvd_scope.dex not built"; exit 1; }
-
-      - name: Package module
-        run: |
-          cd module && zip -r9 "../${{ steps.version.outputs.zip_name }}" . -x '.git*' -x 'vdlu/RELEASE.md' -x 'bin/*/.gitkeep'
-          cd .. && unzip -l "${{ steps.version.outputs.zip_name }}" | tail -n 1
+      # One script builds the staging tree and the zip, so CI and a local run
+      # cannot drift. It also fails if a file the runtime needs is missing from
+      # the archive (identity.sh, both dex helpers, all three .so files).
+      - name: Build the release zip
+        run: bash .github/scripts/build-release.sh --skip-tests
 
       - name: Commit the bump
         if: steps.version.outputs.bumped == 'true'
@@ -226,8 +198,19 @@ jobs:
             printf '\n---\n'
             printf '%s\n' "📣 **Join the channel for updates:** @Priv8_VD https://t.me/Priv8_VD"
           } > release-notes.md
+          # Tag the commit that produced these bytes, then attach the release to
+          # it. The tag is created first so a release can never exist without one;
+          # a pre-existing tag is reused, which makes a re-run of this workflow
+          # idempotent instead of an error.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" >/dev/null 2>&1; then
+              echo "tag ${VERSION} already exists"
+          else
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+                  -f ref="refs/tags/${VERSION}" -f sha="${GITHUB_SHA}" >/dev/null
+              echo "tagged ${GITHUB_SHA:0:7} as ${VERSION}"
+          fi
           gh release create "$VERSION" "${{ steps.version.outputs.zip_name }}" SHA256SUMS.txt \
-            --title "$VERSION" --notes-file release-notes.md
+            --title "$VERSION" --notes-file release-notes.md --verify-tag
           # module/update.json already points at this asset, so the in-app updater works
           # the moment the release exists.
 
