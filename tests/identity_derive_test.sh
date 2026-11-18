@@ -33,7 +33,7 @@ mkdir -p "$TMP/bin"
 # generate would stop before ever reaching the helper this test is about, so
 # provide a `pm` that names one package.
 cat > "$TMP/bin/pm" <<'PM'
-#!/system/bin/sh
+#!/bin/sh
 case "$1" in
     path) case "$2" in com.google.android.gms) echo "package:/data/app/x/base.apk"; exit 0;; esac; exit 1;;
     list) echo "package:com.google.android.gms";;
@@ -46,7 +46,7 @@ chmod 755 "$TMP/bin/pm"
 # identity_dex(). Put a fake app_process first on PATH that forwards to the
 # real Identity class with a fixed package.
 cat > "$TMP/bin/app_process" <<SHIM
-#!/system/bin/sh
+#!/bin/sh
 # args: -Djava.class.path=<dex> /system/bin com.vd171.copgvd.Identity <verb> ...
 verb=""
 for a in "\$@"; do
@@ -98,7 +98,7 @@ fi
 
 echo "derive path: a refused helper is not trusted"
 cat > "$TMP/bin/app_process" <<'SHIM'
-#!/system/bin/sh
+#!/bin/sh
 echo '{"ok":false,"code":"ERR_IDENTITY","message":"no signers"}'
 SHIM
 chmod 755 "$TMP/bin/app_process"
@@ -109,7 +109,7 @@ out=$(PATH="$TMP/bin:$PATH" sh "$REPO/module/identity.sh" generate --seed s 2>&1
 
 echo "derive path: a malformed value is rejected, not shipped"
 cat > "$TMP/bin/app_process" <<'SHIM'
-#!/system/bin/sh
+#!/bin/sh
 echo '{"ok":true,"verb":"ssaid","signers":1,"ssaid":"NOT-HEX"}'
 SHIM
 chmod 755 "$TMP/bin/app_process"
