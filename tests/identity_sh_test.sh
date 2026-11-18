@@ -37,10 +37,15 @@ case "$out" in *usage:*) ok "unknown verb prints usage";; *) bad "no usage text"
 
 echo "generate refuses without a seed helper"
 # No dex in the fake module dir, so SSAID derivation must fail loudly rather
-# than silently inventing a value.
+# than silently inventing a value. Which of two messages appears depends on the
+# host: with no `pm` (a plain CI runner) it stops at "no installed package";
+# with `pm` but no helper it stops at "identity helper". Both are a refusal.
 out=$(sh "$SCRIPT" generate --seed testseed 2>&1); rc=$?
-want "generate fails without the helper" "1" "$rc"
-case "$out" in *"identity helper"*) ok "names the missing helper";; *) bad "unclear failure: $out";; esac
+want "generate fails without a usable helper" "1" "$rc"
+case "$out" in
+    *"identity helper"*|*"no installed package"*) ok "refusal names its reason";;
+    *) bad "unclear failure: $out";;
+esac
 
 echo "overrides bypass the helper"
 out=$(sh "$SCRIPT" generate --seed s --ssaid 0123456789abcdef \

@@ -26,10 +26,25 @@ FAIL=0
 ok()  { echo "  ok   $*"; }
 bad() { echo "  FAIL $*"; FAIL=$((FAIL + 1)); }
 
+mkdir -p "$TMP/bin"
+
+# identity.sh picks the package to derive for with `pm path`, which only exists
+# on a device. On a CI runner the first_package() probe would return nothing and
+# generate would stop before ever reaching the helper this test is about, so
+# provide a `pm` that names one package.
+cat > "$TMP/bin/pm" <<'PM'
+#!/system/bin/sh
+case "$1" in
+    path) case "$2" in com.google.android.gms) echo "package:/data/app/x/base.apk"; exit 0;; esac; exit 1;;
+    list) echo "package:com.google.android.gms";;
+esac
+exit 0
+PM
+chmod 755 "$TMP/bin/pm"
+
 # The shim: identity.sh runs `sh -c '... app_process ... '` through its
 # identity_dex(). Put a fake app_process first on PATH that forwards to the
 # real Identity class with a fixed package.
-mkdir -p "$TMP/bin"
 cat > "$TMP/bin/app_process" <<SHIM
 #!/system/bin/sh
 # args: -Djava.class.path=<dex> /system/bin com.vd171.copgvd.Identity <verb> ...

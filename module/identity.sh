@@ -98,6 +98,21 @@ rand_hex() {  # rand_hex <bytes>
     od -An -tx1 -N "$1" /dev/urandom 2>/dev/null | tr -d ' \n'
 }
 
+# sha256 of stdin, as hex. Android's toybox may not expose `sha256sum` as a
+# command at all (only as an applet), and some images ship it only via toybox,
+# so try both rather than failing the whole generate on a missing tool.
+sha256_hex() {  # sha256_hex <string>
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | cut -d' ' -f1
+    elif command -v toybox >/dev/null 2>&1 && toybox sha256sum </dev/null >/dev/null 2>&1; then
+        printf '%s' "$1" | toybox sha256sum | cut -d' ' -f1
+    elif command -v busybox >/dev/null 2>&1; then
+        printf '%s' "$1" | busybox sha256sum | cut -d' ' -f1
+    else
+        return 1
+    fi
+}
+
 rand_uuid() {
     _h=$(rand_hex 16)
     [ "${#_h}" -eq 32 ] || return 1
@@ -177,8 +192,8 @@ gen_conf() {
     if [ -z "$_gsf" ]; then
         # 16-18 decimal digits, high bit clear: the shape the checkin server
         # returns. sha256 of the seed, folded to digits, no leading zero.
-        _gsf=$(printf '%s' "gsf:$_seed" | sha256sum | cut -d' ' -f1 |
-               tr 'a-f' '0123456789' | sed 's/^0*//' | cut -c1-17)
+        _sum=$(sha256_hex "gsf:$_seed") || die "no sha256 tool (sha256sum or toybox) available"
+        _gsf=$(printf '%s' "$_sum" | tr 'a-f' '0123456789' | sed 's/^0*//' | cut -c1-17)
     fi
     valid_gsf "$_gsf" || die "invalid GSF id: '$_gsf'"
 
