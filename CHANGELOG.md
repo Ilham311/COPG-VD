@@ -1,5 +1,15 @@
 # Changelog
 
+## v6.16.3-vd
+
+- **Installing no longer fails on a conflicting module.** The installer found another integrity module (PlayIntegrityFix, an older COPG, …), asked for a volume key, waited 10 seconds, and then *aborted* when nobody pressed one - so a plain flash from the manager ended with "Failed to install module script" and nothing installed. Conflicting modules are now removed automatically: the manager's own `remove`/`disable` markers are set so their uninstall hooks run, and a copy is kept under `/data/adb/COPG-VD/removed-modules/<timestamp>/` so the removal is reversible. Set `COPGVD_CONFLICT_KEEP=1` to keep them and decide later.
+- The Google Photos prompt is gone too. It waited for a key and disabled the feature on timeout; it is now on by default, with `COPGVD_GPHOTO=false` (or `/data/local/tmp/.copgvd_gphoto` containing `false`) to turn it off. Neither prompt can block or fail an install any more.
+- `update.json` can no longer point at the upstream repository. `.github/scripts/version.sh` defaulted to `VD171/COPG-VD`, so a local version bump rewrote the in-app updater to offer *upstream's* zip - which would have replaced this fork's fixes on the next update. The default is now this fork, and the host suite fails if `update.json` or `updateJson` ever names upstream again.
+
+## v6.16.2-vd
+
+Superseded before release (a version bump only, no separate artifact).
+
 ## v6.16.1-vd
 
 Fork release by Ilham311, based on upstream v6.16-vd.

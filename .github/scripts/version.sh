@@ -25,7 +25,11 @@ set -euo pipefail
 
 MODULE_PROP="module/module.prop"
 UPDATE_JSON="module/update.json"
-REPO="${GITHUB_REPOSITORY:-VD171/COPG-VD}"
+# This fork publishes its own zips. With the upstream default, a local bump
+# rewrote update.json to point at VD171's release, so the module would have
+# offered (and installed) upstream's zip over this fork. GITHUB_REPOSITORY wins
+# when Actions runs, so CI is unaffected; the fallback is the fork.
+REPO="${GITHUB_REPOSITORY:-Ilham311/COPG-VD}"
 SUFFIX="-vd"
 
 action="${1:-read}"

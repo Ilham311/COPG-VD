@@ -27,11 +27,12 @@ CONFIG_FILE="$DATA_DIR/COPG-VD.json"
 LEGACY_JSON="/data/adb/COPG-VD.json"
 CONFLICT_MODULES="COPG playintegrity playintegrityfix [i][n][t][e][g][r][i][t][y][-]*[b][o][x]"
 
-# Headless/commandline mode: resolve the volume prompts to their default without the
-# hardware key wait. On when a marker/env is set, or when `timeout` is missing (then the
-# getevent prompt cannot be time-boxed and would block forever).
-CLI_MODE=false
-{ [ -f /data/local/tmp/.copgvd_cli ] || [ -n "$COPGVD_CLI" ] || ! command -v timeout >/dev/null 2>&1; } && CLI_MODE=true
+# There are no volume-key prompts left in this installer. Both of them used to
+# wait 10s and then pick a default, and the conflict prompt's default was to
+# ABORT the install - which is what made a plain flash from the manager fail
+# with "Failed to install module script" when a conflicting module was present.
+# Choices are now read from the environment or from marker files under
+# /data/local/tmp, so a flash is deterministic and never blocks.
 
 print_box_start() {
   ui_print "╔═════════════════════════════════╗"
@@ -85,57 +86,39 @@ print_module_version() {
   print_empty_line
 }
 
+# No volume-key prompt. A flash from the manager has nobody to press a key, and
+# waiting 10s only to fall back was pure delay; two prompts meant a failed
+# install could be caused by a timeout rather than by anything wrong.
+#
+# Unlimited Photos is on by default because it is the shipped intent of this
+# block (it patches the Pixel sysconfig files that gate the feature), and it is
+# one of the two things the upstream README tells you the module is for. To keep
+# it off, either set COPGVD_GPHOTO=false in the environment, or write
+# /data/local/tmp/.copgvd_gphoto containing "false".
 prompt_gphoto_spoof() {
+  ENABLE_GPHOTO_SPOOF=true
+
+  if [ -n "${COPGVD_GPHOTO:-}" ]; then
+    ENABLE_GPHOTO_SPOOF="$COPGVD_GPHOTO"
+  elif [ -f /data/local/tmp/.copgvd_gphoto ]; then
+    ENABLE_GPHOTO_SPOOF="$(cat /data/local/tmp/.copgvd_gphoto 2>/dev/null || echo true)"
+  fi
+
+  case "$ENABLE_GPHOTO_SPOOF" in
+    false|no|0|off) ENABLE_GPHOTO_SPOOF=false ;;
+    *)              ENABLE_GPHOTO_SPOOF=true ;;
+  esac
+
   print_box_start
   ui_print "      ✦ Google Photos Spoof ✦    "
   print_empty_line
-  ui_print " ❓ Enable Unlimited Photos?      "
-  ui_print " ➤ Volume Up: Yes (Recommended)  "
-  ui_print " ➤ Volume Down: No               "
-  print_box_end
-
-  if $CLI_MODE; then
-    [ -n "$COPGVD_GPHOTO" ] && ENABLE_GPHOTO_SPOOF="$COPGVD_GPHOTO"
-    [ -f /data/local/tmp/.copgvd_gphoto ] && ENABLE_GPHOTO_SPOOF="$(cat /data/local/tmp/.copgvd_gphoto 2>/dev/null || echo false)"
-    ui_print " ⌨ CLI mode: Google Photos spoof = $ENABLE_GPHOTO_SPOOF"
-    return
+  if $ENABLE_GPHOTO_SPOOF; then
+    ui_print " ✔ Unlimited Photos: enabled     "
+    ui_print "   (disable: COPGVD_GPHOTO=false)"
+  else
+    ui_print " ✗ Unlimited Photos: disabled    "
   fi
-
-  TIMEOUT=10
-  START_TIME=$(date +%s)
-
-  while true; do
-    CURRENT_TIME=$(date +%s)
-    ELAPSED=$((CURRENT_TIME - START_TIME))
-    if [ $ELAPSED -ge $TIMEOUT ]; then
-      print_empty_line
-      ui_print " ⏰ Timeout (10s) - Disabled"
-      ENABLE_GPHOTO_SPOOF=false
-      return
-    fi
-
-    if command -v timeout >/dev/null 2>&1; then
-      EVENT=$(timeout 0.1 getevent -lc1 2>/dev/null | tr -d '\r')
-    else
-      EVENT=$(getevent -lc1 2>/dev/null | tr -d '\r')
-    fi
-
-    if [ -n "$EVENT" ]; then
-      if echo "$EVENT" | grep -q "KEY_VOLUMEUP.*DOWN"; then
-        print_empty_line
-        ui_print " ✅ Enabled Unlimited Photos"
-        ENABLE_GPHOTO_SPOOF=true
-        return
-      elif echo "$EVENT" | grep -q "KEY_VOLUMEDOWN.*DOWN"; then
-        print_empty_line
-        ui_print " ❌ Disabled Unlimited Photos"
-        ENABLE_GPHOTO_SPOOF=false
-        return
-      fi
-    fi
-
-    sleep 0.1
-  done
+  print_box_end
 }
 
 setup_gphoto_spoof() {
@@ -241,77 +224,62 @@ check_conflict_modules() {
   done
   [ -z "$FOUND" ] && return
 
+  # No prompt. The install used to wait 10s for a volume key and then ABORT when
+  # nobody pressed it, which made a normal flash from the manager fail with
+  # "Failed to install module script" and left the user with nothing installed.
+  # Removing the conflicting modules is the only outcome that leaves a working
+  # spoof, so it happens automatically.
+  #
+  # Two guards keep that from being destructive:
+  #   * the module is removed by the manager's own `remove` marker, not by rm -rf,
+  #     so its own uninstall hook runs;
+  #   * its directory is copied to /data/adb/COPG-VD/removed-modules/<stamp>/ first,
+  #     so "why did my module disappear" has an answer and a way back.
   print_box_start
   ui_print " ✦ Found Conflicting Modules: ✦ "
   print_empty_line
   for found in $FOUND; do
-    ui_print " . $found "
+    ui_print " . ${found##*/} "
   done
   print_empty_line
-  ui_print " ❓ What to do now? "
-  ui_print " ➤ Volume Up: Uninstall all them. "
-  ui_print " ➤ Volume Down: Do it after. "
+  ui_print " ➤ Removing them automatically   "
+  ui_print " ➤ They cannot work together:    "
+  ui_print "   both rewrite the same props.  "
   print_box_end
+  print_empty_line
 
-  if $CLI_MODE; then
-    if [ -n "$COPGVD_CONFLICT_UNINSTALL" ]; then
-      ui_print " ⌨ CLI mode: uninstalling conflicting modules"
-      for found in $FOUND; do
-        touch "$found/disable"
-        touch "$found/remove"
-      done
-      return
-    fi
-    ui_print " ⌨ CLI mode: conflicting modules present - aborting"
-    ui_print "   (uninstall them first, or set COPGVD_CONFLICT_UNINSTALL=1)"
-    print_failure_and_exit
+  if [ -n "$COPGVD_CONFLICT_KEEP" ]; then
+    # Escape hatch for anyone who wants to decide for themselves.
+    ui_print " ⌨ COPGVD_CONFLICT_KEEP set - leaving them in place"
+    ui_print "   (the spoof may not apply until they are removed)"
     return
   fi
 
-  TIMEOUT=10
-  START_TIME=$(date +%s)
+  STAMP=$(date +%Y%m%d-%H%M%S 2>/dev/null || echo manual)
+  KEEP_DIR="$DATA_DIR/removed-modules/$STAMP"
+  mkdir -p "$KEEP_DIR" 2>/dev/null
+  chcon u:object_r:system_file:s0 "$DATA_DIR/removed-modules" 2>/dev/null
 
-  while true; do
-    CURRENT_TIME=$(date +%s)
-    ELAPSED=$((CURRENT_TIME - START_TIME))
-    if [ $ELAPSED -ge $TIMEOUT ]; then
-      print_empty_line
-      print_box_start
-      ui_print " ⏰ Timeout (10s) - Do it after."
-      print_failure_and_exit
-      return
+  for found in $FOUND; do
+    name=${found##*/}
+    # Keep a copy so the removal is reversible, then use the manager's markers.
+    if [ -d "$KEEP_DIR" ]; then
+      cp -a "$found" "$KEEP_DIR/$name" 2>/dev/null &&
+        chcon -R u:object_r:system_file:s0 "$KEEP_DIR/$name" 2>/dev/null
     fi
-
-    if command -v timeout >/dev/null 2>&1; then
-      EVENT=$(timeout 0.1 getevent -lc1 2>/dev/null | tr -d '\r')
-    else
-      EVENT=$(getevent -lc1 2>/dev/null | tr -d '\r')
-    fi
-
-    if [ -n "$EVENT" ]; then
-      if echo "$EVENT" | grep -q "KEY_VOLUMEUP.*DOWN"; then
-        print_empty_line
-        print_box_start
-        ui_print " ✅ Uninstall all them."
-        for found in $FOUND; do
-          touch "$found/disable"
-          touch "$found/remove"
-        done
-        print_box_end
-        return
-      elif echo "$EVENT" | grep -q "KEY_VOLUMEDOWN.*DOWN"; then
-        print_empty_line
-        print_box_start
-        ui_print " ❌ Do it after."
-        print_failure_and_exit
-        return
-      fi
-    fi
-
-    sleep 0.1
+    touch "$found/disable" 2>/dev/null
+    touch "$found/remove" 2>/dev/null
+    ui_print " ✔ removed: $name"
   done
 
+  if [ -d "$KEEP_DIR" ]; then
+    ui_print "   copy kept at:"
+    ui_print "   $KEEP_DIR"
+    ui_print "   restore: move it back to /data/adb/modules/"
+  fi
+  print_empty_line
 }
+
 
 print_module_version
 

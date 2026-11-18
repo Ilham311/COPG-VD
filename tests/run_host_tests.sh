@@ -111,6 +111,9 @@ step "identity.sh: derive path consumes the helper correctly"
 if sh "$ROOT/tests/identity_derive_test.sh" "$WORK/classes" "$AJ"; then ok; else no "identity_derive_test.sh"; fi
 
 # ------------------------------------------------------------ script syntax
+step "installer: a conflicting module removes itself, never aborts"
+if sh "$ROOT/tests/customize_test.sh" >/dev/null; then ok; else no "customize_test.sh"; fi
+
 step "shell syntax"
 for f in "$ROOT"/module/*.sh "$ROOT"/module/vdlu/update.sh "$ROOT"/module/vdlu/vdlu-verify; do
     [ -f "$f" ] || continue
@@ -197,6 +200,34 @@ for e in errs:
 sys.exit(1 if errs else 0)
 PY
 if [ $? -eq 0 ]; then echo "   config invariants ok"; ok; else no "config invariants"; fi
+
+step "update.json points at this fork, not upstream"
+python3 - "$ROOT" <<'PY2'
+import json, re, sys
+root = sys.argv[1]
+u = json.load(open(root + "/module/update.json"))
+prop = open(root + "/module/module.prop").read()
+errs = []
+if "VD171/COPG-VD" in u["zipUrl"]:
+    errs.append("zipUrl points at upstream: " + u["zipUrl"])
+if "Ilham311/COPG-VD" not in u["zipUrl"]:
+    errs.append("zipUrl does not name the fork: " + u["zipUrl"])
+ver = re.search(r"^version=(.+)$", prop, re.M).group(1)
+code = re.search(r"^versionCode=(.+)$", prop, re.M).group(1)
+if u["version"] != ver:
+    errs.append(f"update.json version {u['version']} != module.prop {ver}")
+if str(u["versionCode"]) != code:
+    errs.append(f"update.json versionCode {u['versionCode']} != module.prop {code}")
+if u["version"] not in u["zipUrl"]:
+    errs.append("zipUrl does not carry the version tag")
+upd = re.search(r"^updateJson=(.+)$", prop, re.M).group(1)
+if "VD171/COPG-VD" in upd:
+    errs.append("updateJson points at upstream: " + upd)
+for e in errs:
+    print("   FAILED:", e)
+sys.exit(1 if errs else 0)
+PY2
+if [ $? -eq 0 ]; then echo "   update chain ok"; ok; else no "update.json"; fi
 
 # ------------------------------------------------------------------ summary
 printf '\n-------------------------\n%d step(s) passed, %d failed\n' "$PASS" "$FAIL"
