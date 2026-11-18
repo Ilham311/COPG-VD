@@ -49,16 +49,22 @@ if [ "$SKIP_TESTS" = 0 ] && [ -x tests/run_host_tests.sh ]; then
 fi
 
 # ------------------------------------------------------------------ dex
+# Glob-expanded paths are unreliable here: under `set -e` an unmatched glob in
+# a command substitution aborts the script, and a literal `/path/*.jar` is not
+# a real file anyway. So expand explicitly and test each candidate.
 find_android_jar() {
-    for c in \
-        "${ANDROID_JAR:-}" \
-        "${ANDROID_SDK_ROOT:-/nonexistent}/platforms/android-35/android.jar" \
-        "$(ls -d "${ANDROID_SDK_ROOT:-/nonexistent}"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)" \
-        "$(ls -d "$HOME/Android/Sdk"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)" \
-        /usr/local/lib/android/sdk/platforms/android-*/android.jar \
-        /data/data/com.termux/files/usr/share/java/android.jar
-    do
-        [ -n "$c" ] && [ -f "$c" ] && { echo "$c"; return 0; }
+    if [ -n "${ANDROID_JAR:-}" ] && [ -f "$ANDROID_JAR" ]; then
+        printf '%s\n' "$ANDROID_JAR"; return 0
+    fi
+    _roots="${ANDROID_HOME:-} ${ANDROID_SDK_ROOT:-} /usr/local/lib/android/sdk $HOME/Android/Sdk"
+    for _r in $_roots; do
+        [ -d "$_r/platforms" ] || continue
+        _j=$(ls -1 "$_r"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1 || true)
+        [ -n "$_j" ] && [ -f "$_j" ] && { printf '%s\n' "$_j"; return 0; }
+    done
+    for _j in /data/data/com.termux/files/usr/share/java/android.jar \
+              /usr/share/java/android.jar; do
+        [ -f "$_j" ] && { printf '%s\n' "$_j"; return 0; }
     done
     return 1
 }
@@ -68,11 +74,23 @@ for f in module/etc/copgvd_scope.dex module/etc/copgvd_identity.dex; do
     [ -s "$f" ] || need_dex=1
 done
 if [ "$need_dex" = 1 ]; then
-    if AJ=$(find_android_jar) && command -v javac >/dev/null && command -v d8 >/dev/null; then
+    AJ="$(find_android_jar || true)"
+    D8BIN="$(command -v d8 2>/dev/null || true)"
+    # The runner's d8 lives under build-tools; the SDK step installs it there but
+    # does not always put it on PATH.
+    if [ -z "$D8BIN" ]; then
+        for _r in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" /usr/local/lib/android/sdk; do
+            [ -d "$_r/build-tools" ] || continue
+            D8BIN=$(ls -1 "$_r"/build-tools/*/d8 2>/dev/null | sort -V | tail -1 || true)
+            [ -n "$D8BIN" ] && break
+        done
+    fi
+    if [ -n "$AJ" ] && command -v javac >/dev/null 2>&1 && [ -n "$D8BIN" ] && [ -x "$D8BIN" ]; then
         echo "building the dex helpers (android.jar: $AJ)"
-        ANDROID_JAR="$AJ" ANDROID_SDK_ROOT="$(dirname "$(dirname "$AJ")")" bash dex/build.sh
+        ANDROID_JAR="$AJ" PATH="$(dirname "$D8BIN"):$PATH" bash dex/build.sh
     else
-        echo "::error::dex helpers missing and no JDK/android.jar to build them" >&2
+        echo "::error::dex helpers missing and cannot be built" >&2
+        echo "  android.jar: ${AJ:-none}, javac: $(command -v javac || echo none), d8: ${D8BIN:-none}" >&2
         exit 1
     fi
 fi
