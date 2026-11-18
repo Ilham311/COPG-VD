@@ -10,8 +10,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORK="${TMPDIR:-/data/local/tmp}/copgvd-hosttest.$$"
-mkdir -p "$WORK"
+WORK="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}/copgvd-hosttest.$$"
+mkdir -p "$WORK" 2>/dev/null || { echo "cannot create a work dir at $WORK"; exit 2; }
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 PASS=0

@@ -14,8 +14,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 SCRIPT="$REPO/module/fingerprint-update.sh"
 
-TMP=${TMPDIR:-/data/local/tmp}/copgvd-feedsig.$$
-mkdir -p "$TMP/data"
+TMP=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}/copgvd-feedsig.$$
+mkdir -p "$TMP/data" 2>/dev/null || { echo "cannot create a work dir at $TMP"; exit 2; }
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 FAIL=0

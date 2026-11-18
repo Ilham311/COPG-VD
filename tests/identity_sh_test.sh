@@ -15,8 +15,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 SCRIPT="$REPO/module/identity.sh"
 
-TMP=${TMPDIR:-/data/local/tmp}/copgvd-idtest.$$
-mkdir -p "$TMP"
+TMP=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}/copgvd-idtest.$$
+mkdir -p "$TMP" 2>/dev/null || { echo "cannot create a work dir at $TMP"; exit 2; }
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 FAIL=0

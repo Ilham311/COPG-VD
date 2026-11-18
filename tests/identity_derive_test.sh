@@ -18,8 +18,8 @@ AJ=${2:?usage: identity_derive_test.sh <classes-dir> <android.jar>}
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
-TMP=${TMPDIR:-/data/local/tmp}/copgvd-derive.$$
-mkdir -p "$TMP/module/etc" "$TMP/data"
+TMP=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}/copgvd-derive.$$
+mkdir -p "$TMP/module/etc" "$TMP/data" 2>/dev/null || { echo "cannot create a work dir at $TMP"; exit 2; }
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 FAIL=0
